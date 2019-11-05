@@ -57,6 +57,11 @@ class Radiation {
   double ICEmissivityAnisotropicIsotropicElectronsAharonian(double x, void *par);
   double ICEmissivityAnisotropicIsotropicElectronsAharonianSecondIntegral(double x, void *par);
   double ICEmissivityAnisotropicIsotropicElectronsAharonianFirstIntegral(double x, void *par);
+  double NeutrinoFlux2(double energy_proton, void *par);
+  double NeutrinoFlux1(double energy_proton, void *par);
+  double Felectron(double Ee_erg, double Ep_erg);
+  double Fnumu(double Enu_erg, double Ep_erg);
+  
   double K(double nu, double x);             ///< modified Bessel function
   double K_53(double x, void *par);  ///< modified Bessel function of order 5/3
   double SynchEmissivity(double x, void *par);  ///< Synchrotron emission from a
@@ -295,6 +300,7 @@ class Radiation {
                                       vector< vector<double> > vec);  ///< returns SED for
                                                         ///emission component i
                                                         ///as 2D vector
+  double CalculateNeutrinoFlux(double energy, int leptontype);
   void SetBField(double BFIELD) {
     BField = BFIELD;
   }  ///< set the source B-Field (G)
