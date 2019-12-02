@@ -460,7 +460,8 @@ class Radiation {
   vector<vector<double> > GetNeutrinoSED(void); /// Return the neutrino SED
   vector<vector<double> > GetNeutrinoSpectrumMuon(void);
   vector<vector<double> > GetNeutrinoSpectrumElectron(void);
-  
+  vector<vector<double> > GetNeutrinoSEDMuon(void);
+  vector<vector<double> > GetNeutrinoSEDElectron(void);
   
   Radiation *Clone() { return this; }
   void SetPPEmissionModel(int PIMODEL) {
