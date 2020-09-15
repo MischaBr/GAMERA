@@ -365,7 +365,7 @@ double Radiation::DifferentialEmissionComponent(double e, void *par) {
   } else if (!radiationMechanism.compare("ppEmission")) {
     if (!n) {
       if(!QUIETMODE) cout << "Radiation::DifferentialEmissionComponent:"
-                             "No ambient density value set for"
+                             "No ambient density value set for "
                              "p-p scattering. Returning zero value." << endl;
       return 0.;
     }
@@ -758,8 +758,8 @@ double Radiation::ICEmissivityAnisotropicIsotropicElectronsFirstIntegral(double 
     
 }
 
-//--------------------------------------------------------------------------------------------------------
-//--------------------------------------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------------------
 
 
 
@@ -1514,6 +1514,248 @@ void Radiation::GetBParams(double Tp, double &b1, double &b2, double &b3) {
   if (Tp > 50. && PiModel == 1) b1 = 9.06, b2 = 0.3795, b3 = 1.105e-2;
   return;
 }
+
+
+
+
+
+/*---- Calculation of neutrinos following Kelner et al 2006 --- */
+
+/*************************************************************************
+ * Calculation of the Neutrino spectrum. It fills the vectors
+ * MuonNeutrinoVector, ElectronNeutrinoVector and TotalNeutrinoVector.
+ * Input:   - Energy points where to calculate the spectrum in [erg]
+ * **********************************************************************/
+void Radiation::CalculateNeutrinoSpectrum(vector<double> points){
+  if (MuonNeutrinoVector.size()) fUtils->Clear2DVector(MuonNeutrinoVector);
+  if (ElectronNeutrinoVector.size()) fUtils->Clear2DVector(ElectronNeutrinoVector);
+  if (TotalNeutrinoVector.size()) fUtils->Clear2DVector(TotalNeutrinoVector);
+  if (!ProtonVector.size()) {
+    cout << "Radiation::CalculateNeutrinoSpectrum: No proton spectrum filled "
+            "-> No neutrino spectra to calculate. Exiting..." << endl;
+    return;
+  }
+  if (!QUIETMODE) {
+    cout << "_________________________________________" << endl;
+    cout << ">> CALCULATING NEUTRINO SED FROM PARENT PROTONS " << endl;
+  }
+  double E, nu1, nu2, total_flux;
+  int size = (int)points.size();
+ for(int i = 0; i < size; i++ ){
+     if (QUIETMODE == false) {
+      cout << "\r";
+      cout << "    "
+           << i+1 << " / " << size
+           << " points calculated" << std::flush;
+     }
+     E = points[i];
+     nu1 = CalculateNeutrinoFlux(E, 1);
+     nu2 = CalculateNeutrinoFlux(E, 0);
+     total_flux = nu1 + 2.*nu2;
+     fUtils->TwoDVectorPushBack(E, nu1, MuonNeutrinoVector);
+     fUtils->TwoDVectorPushBack(E, nu2, ElectronNeutrinoVector);
+     fUtils->TwoDVectorPushBack(E, total_flux, TotalNeutrinoVector);
+ }
+ if (QUIETMODE == false) {
+    cout << endl;
+    cout << "    -> DONE!   " << endl;
+    cout << endl;
+    cout << ">> NEUTRINO CALCULATION DONE. EXITING." << endl;
+    cout << endl;
+ }
+ return;
+}
+
+
+
+/*****************************************************************************************
+ *  Integrates and returns the result, used by the function CalculateNeutrinoSpectrum
+ *   Input:  - Energy of the neutrinos (or electrons) in [erg]
+ *           - leptontype: '0' for electron/muon neutrinos from decay of muons and '1' 
+ *              for muons from direct charged pion decay
+ *  Output: - Flux
+ ****************************************************************************************/
+double Radiation::CalculateNeutrinoFlux(double energy, int leptontype) {
+    if (!n) {
+        if(!QUIETMODE) cout << "Radiation::CalculateNeutrinoFlux: "
+                             "No ambient density value set "
+                             "for p-p scattering. Returning zero value." << endl;
+        return 0.;
+    }
+    double integral = 0;
+    const double ethresh = 1.22e-3 * TeV_to_erg;  // Threshold for pion production
+    double emax = ProtonVector[ProtonVector.size() - 1][0];
+    double emin = energy;
+    if (emin < ethresh) emin = ethresh; // Don't start integration below the threshold
+    if (emin >= emax) return 0.; // We can not produce neutrinos more energetic than the protons
+    
+
+    // Contains the energy of the muon
+    double integralinput[1];
+    integralinput[0] = energy;    
+    
+    // Convert everything to logarithmic values
+    double emin_log = log10(emin);
+    double emax_log = log10(emax);
+    
+    // Set the function for the spectrum to electron neutrinos (or electrons) or muon neutrinos
+    if (leptontype == 0) {
+        fPointer Fnu = &Radiation::NeutrinoFlux1;
+        integral = Integrate(Fnu, integralinput, emin_log, emax_log,integratorTolerance*5., integratorKronrodRule);
+    }
+    
+    else if (leptontype == 1) {
+        double emin_new = energy/0.427;
+        if(emin_new > emin) emin_log = log10(emin_new);
+        if(emax_log < emin_log) return 0.0;
+        fPointer Fnu = &Radiation::NeutrinoFlux2;
+        // integrate the function
+        integral = Integrate(Fnu, integralinput, emin_log, emax_log,integratorTolerance*5., integratorKronrodRule);
+    }
+    else {
+        cout << "Radiation::CalculateNeutrinoFlux: No valid lepton type specified.";
+        return 0.;
+    }
+    double constant = c_speed * n;  // n is the ambient density of protons in [cm-3]
+    double result = constant * integral * ln10;
+    return result;
+}
+
+
+
+/**********************************************************************
+ * Function to be integrated to get the neutrino emission for
+ * electron- and muon-Neutrino produced in the muon decay,
+ * as well as the electron spectrum.
+ * Input:   - Energy of the proton in [erg]
+ *          - energy of the muon/electron as a parameter in [erg]
+ * Output:  - The integrand (see e.g. equ. 71 or 72 in Kelner et al.
+ *              2006
+ *********************************************************************/
+double Radiation::NeutrinoFlux1(double energy_proton, void *par) {
+    double *p = (double *)par;
+    double energy_nu = p[0];
+    
+    double logprotons = fUtils->EvalSpline(energy_proton,ProtonLookup,
+                                      acc,__func__,__LINE__);
+    double Jp = pow(10, logprotons);   // Proton flux, Jp in Kelner 2006
+    
+    // Convert the energy to the real value again
+    energy_proton = pow(10, energy_proton);
+    double sigma = InelasticPPXSectionKaf(energy_proton);   // calculate the cross section
+    double Fnu = Felectron(energy_nu, energy_proton);
+    
+    double result = sigma*Jp*Fnu;
+    return result;
+}
+
+
+
+/**********************************************************************
+ * Function to be integrated to get the muon-neutrino emission produced
+ * in the pion decay.
+ * Input:   - Energy of the proton in [erg]
+ *          - energy of the muon as a parameter in [erg]
+ * Output:  - The integrand (see e.g. equ. 71 or 72 in Kelner et al.
+ *              2006
+ *********************************************************************/
+double Radiation::NeutrinoFlux2(double energy_proton, void *par) {
+    double *p = (double *)par;
+    double energy_nu = p[0];
+    
+    
+    double logprotons = fUtils->EvalSpline(energy_proton,ProtonLookup,
+                                      acc,__func__,__LINE__);
+    double Jp = pow(10, logprotons);   // Proton flux, Jp in Kelner 2006
+    energy_proton = pow(10, energy_proton);
+    double sigma = InelasticPPXSectionKaf(energy_proton);   // calculate the cross section
+    double Fnu = Fnumu(energy_nu, energy_proton);
+    
+    double result = sigma*Jp*Fnu;
+    return result;
+}
+
+
+/********************************************************************************* 
+ * Function for electrons and muon neutrinos from pion and muon decay
+ * Equations 62 to 65 from Kelner et al 2006
+ * Input:
+ *       - Energy of electrons or neutrinos, where the flux should
+ *           be calculated in [erg]
+ *       - Energy of protons in [erg]
+ *   Output:
+ *       - Flux
+ ********************************************************************************/
+double Radiation::Felectron(double Ee_erg, double Ep_erg) 
+{
+
+  double Ee = Ee_erg*erg_to_TeV;    // Elektron/neutrino energy in TeV
+  double Ep = Ep_erg*erg_to_TeV;
+
+
+  double x = Ee/Ep; 
+  //if (x<1.e-4) return 0.0; /// hack
+
+  if (Ep < 0.04) Ep = 0.04; // HACK!!!!!!!!
+
+  double L = log(Ep);
+  double L2 = L*L; 
+  double B = 1.0/(69.5 + 2.65*L + 0.3*L2);
+  double beta = 1.0/pow(0.201 + 0.062*L+0.00042*L2,0.25); 
+  double kappa = (0.279 + 0.141*L + 0.0172*L2)/(0.3 + pow(2.3 + L,2));
+  
+  double xb = pow(x,beta);
+
+  double p1 = B;
+  double p2 = pow(1+kappa*log(x)*log(x),3)/(x*(1 + 0.3/xb));
+  double p3 = pow(-log(x),5);
+  
+  return p1*p2*p3;
+}
+
+/********************************************************************************* 
+ * Function for muon neutrinos from pion decay
+ * Equations 66 to 69 from Kelner et al 2006
+ * Input:
+ *       - Energy of neutrinos, where the flux should
+ *           be calculated in [erg]
+ *       - Energy of protons in [erg]
+ *   Output:
+ *       - Flux
+ ********************************************************************************/
+double Radiation::Fnumu(double Enu_erg, double Ep_erg)
+{
+
+  double Ep = Ep_erg*erg_to_TeV;
+  double Enu = Enu_erg*erg_to_TeV;
+
+  double x = Enu/Ep;
+  double y = x/0.427;
+  //if (x > 0.427) return 0.0;
+
+  double L = log(Ep);
+  double L2 = L * L; 
+  double B = 1.75 + 0.204 * L + 0.010 * L2;
+  double beta = 1.0/(1.67 + 0.111 * L + 0.0038*L2); 
+  double kappa = 1.07 - 0.086*L + 0.002*L2;
+
+  double yb = pow(y,beta);
+
+  double p1 = B*log(y)/y;
+  double p2 = pow((1-yb)/(1+kappa*yb*(1-yb)),4);
+  double p3 = (1/log(y)) 
+    - (4*beta*yb/(1-yb)) 
+    - 4*kappa*beta*yb*(1-2*yb)/(1+kappa*yb*(1-yb));
+  
+  return p1*p2*p3;
+} 
+
+/******** END of Neutrino calculations *******************************/
+
+
+
+
+
 
 /* ----         END OF RADIATION MODELS        ----  */
 
@@ -2902,6 +3144,101 @@ double Radiation::GetIntegratedFlux(int i, double emin, double emax, bool ENERGY
   fUtils->ToggleQuietMode();
   return val;
 }
+
+
+vector<vector<double> > Radiation::GetNeutrinoSpectrum(void){
+ int size = (int)TotalNeutrinoVector.size();
+ if (size == 0){
+     cout << "Radiation::GetNeutrinoSpectrum: No neutrinos calculated. "
+            "Returning empty vector. Fill it via "
+            "Radiation::CalculateNeutrinoSpectrum() first!" << endl;
+ }
+ return TotalNeutrinoVector;   
+}
+
+
+vector<vector<double> > Radiation::GetNeutrinoSED(void){
+ int size = (int)TotalNeutrinoVector.size();
+ vector<vector<double> > tempVec;
+ if (size == 0){
+     cout << "Radiation::GetNeutrinoSED: No neutrinos calculated. "
+            "Returning empty vector. Fill it via "
+            "Radiation::CalculateNeutrinoSpectrum() first!" << endl;
+    return tempVec;
+ }
+ double E, E_TeV, flux, sed_value;
+ for ( int i = 0; i < size; i++ ){
+     E = TotalNeutrinoVector[i][0];
+     flux = TotalNeutrinoVector[i][1];
+     E_TeV = E*erg_to_TeV;
+     sed_value = flux*E*E;
+     fUtils->TwoDVectorPushBack(E_TeV, sed_value, tempVec);
+ }
+ return tempVec;
+}
+
+
+
+vector<vector<double> > Radiation::GetNeutrinoSpectrumMuon(void){
+ int size = (int)MuonNeutrinoVector.size();
+ if (size == 0){
+     cout << "Radiation::GetNeutrinoSpectrumMuon: No neutrinos calculated. "
+            "Returning empty vector. Fill it via "
+            "Radiation::CalculateNeutrinoSpectrum() first!" << endl;
+ }
+ return MuonNeutrinoVector;   
+}
+
+vector<vector<double> > Radiation::GetNeutrinoSEDMuon(void){
+ int size = (int)MuonNeutrinoVector.size();
+ vector<vector<double> > tempVec;
+ if (size == 0){
+     cout << "Radiation::GetNeutrinoSEDMuon: No neutrinos calculated. "
+            "Returning empty vector. Fill it via "
+            "Radiation::CalculateNeutrinoSpectrum() first!" << endl;
+    return tempVec;
+ }
+ double E, E_TeV, flux, sed_value;
+ for ( int i = 0; i < size; i++ ){
+     E = MuonNeutrinoVector[i][0];
+     flux = MuonNeutrinoVector[i][1];
+     E_TeV = E*erg_to_TeV;
+     sed_value = flux*E*E;
+     fUtils->TwoDVectorPushBack(E_TeV, sed_value, tempVec);
+ }
+ return tempVec;
+}
+
+
+vector<vector<double> > Radiation::GetNeutrinoSpectrumElectron(void){
+ int size = (int)ElectronNeutrinoVector.size();
+ if (size == 0){
+     cout << "Radiation::GetNeutrinoSpectrumElectron: No neutrinos calculated. "
+            "Returning empty vector. Fill it via "
+            "Radiation::CalculateNeutrinoSpectrum() first!" << endl;
+ }
+ return ElectronNeutrinoVector;   
+}
+vector<vector<double> > Radiation::GetNeutrinoSEDElectron(void){
+ int size = (int)ElectronNeutrinoVector.size();
+ vector<vector<double> > tempVec;
+ if (size == 0){
+     cout << "Radiation::GetNeutrinoSEDElectron: No neutrinos calculated. "
+            "Returning empty vector. Fill it via "
+            "Radiation::CalculateNeutrinoSpectrum() first!" << endl;
+    return tempVec;
+ }
+ double E, E_TeV, flux, sed_value;
+ for ( int i = 0; i < size; i++ ){
+     E = ElectronNeutrinoVector[i][0];
+     flux = ElectronNeutrinoVector[i][1];
+     E_TeV = E*erg_to_TeV;
+     sed_value = flux*E*E;
+     fUtils->TwoDVectorPushBack(E_TeV, sed_value, tempVec);
+ }
+ return tempVec;
+}
+
 
 
 /**
