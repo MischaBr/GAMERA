@@ -1535,10 +1535,30 @@ void Radiation::CalculateNeutrinoSpectrum(vector<double> points){
             "-> No neutrino spectra to calculate. Exiting..." << endl;
     return;
   }
+  
+  
+  if( !AmbientMediumComposition.size()){
+      vector<double> temp0; temp0.resize(2);
+      vector<vector<double> > temp;
+      if (!n) { temp0[0] = 1.0; temp0[1] = 0.0;
+          temp.push_back(temp0);
+      }
+      else { temp0[0] = 1.0; temp0[1] = n;
+          temp.push_back(temp0);
+      }
+      SetAmbientMediumComposition(temp);
+  }
+  
+  
+  
   if (!QUIETMODE) {
-    cout << "_________________________________________" << endl;
+    cout << "_______________________________________________" << endl;
     cout << ">> CALCULATING NEUTRINO SED FROM PARENT PROTONS " << endl;
   }
+  
+  current_Hadron_lookup = ProtonLookup;
+  current_mass_number = 1.0;
+  
   double E, nu1, nu2, total_flux;
   int size = (int)points.size();
  for(int i = 0; i < size; i++ ){
@@ -1616,8 +1636,9 @@ double Radiation::CalculateNeutrinoFlux(double energy, int leptontype) {
         cout << "Radiation::CalculateNeutrinoFlux: No valid lepton type specified.";
         return 0.;
     }
-    double constant = c_speed * n;  // n is the ambient density of protons in [cm-3]
-    double result = constant * integral * ln10;
+    //double constant = c_speed * n;  // n is the ambient density of protons in [cm-3]
+    //double result = constant * integral * ln10;
+    double result = c_speed * integral * ln10;
     return result;
 }
 
@@ -1640,12 +1661,14 @@ double Radiation::NeutrinoFlux1(double energy_proton, void *par) {
                                       acc,__func__,__LINE__);
     double Jp = pow(10, logprotons);   // Proton flux, Jp in Kelner 2006
     
+    double NuclearEnhancement = CalculateEpsilon(energy_proton, current_mass_number);
+    
     // Convert the energy to the real value again
     energy_proton = pow(10, energy_proton);
     double sigma = InelasticPPXSectionKaf(energy_proton);   // calculate the cross section
     double Fnu = Felectron(energy_nu, energy_proton);
     
-    double result = sigma*Jp*Fnu;
+    double result = sigma*Jp*Fnu*NuclearEnhancement;
     return result;
 }
 
@@ -1671,7 +1694,9 @@ double Radiation::NeutrinoFlux2(double energy_proton, void *par) {
     double sigma = InelasticPPXSectionKaf(energy_proton);   // calculate the cross section
     double Fnu = Fnumu(energy_nu, energy_proton);
     
-    double result = sigma*Jp*Fnu;
+    double NuclearEnhancement = CalculateEpsilon(energy_proton, current_mass_number);
+    
+    double result = sigma*Jp*Fnu*NuclearEnhancement;
     return result;
 }
 
