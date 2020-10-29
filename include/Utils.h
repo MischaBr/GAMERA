@@ -107,21 +107,33 @@ class Utils {
   gsl_interp_accel *yacc;
 
  public:
+  /// Constructor
   Utils(bool DRAWLOGO = false);
+  /// Destructor
   ~Utils();
+  /// Generic parameter file reading function
   int ReadParameterFile(string inputname, vector<string> parameter_names,
                         vector<string> files_names,
                         vector<double> &parameter_values,
                         vector<string> &files);
+  /// Draw the GAMERA logo
   void DrawGamera();
+  /// Draw the GAPPA logo
   void DrawGappa();
+  /// Write spectrum on file
   void WriteOut(vector<vector<double> > sp, string outname);
+  /// Read a spectrum from file
   void ReadIn(string inname, vector< vector<double> > &sp);
+  /// Random number generator [0,1)
   double Random();
+  /// Get n uniform random numbers in [x_min,x_max)
   vector<double>  UniformRandom(double x_min, double x_max,int n);
+  /// Get linearly distributed variates
   vector<double>  LinearRandom(double slope, double x_min, double x_max, int n);
+  /// Get power-law distributed variates
   vector<double>  PowerLawRandom(double index, double x_min, double x_max,
                                  int n);
+  /// Get random numbers with gaussian distribution
   vector<double>  GaussianRandom(double width, double offset, int n);
   vector<double>  SignRandom(int n);
   vector<double>  ExponentialRandom(double ind_norm, double x_min,
@@ -147,7 +159,7 @@ class Utils {
   void Clear2DVector(vector< vector<double> > &v);
   void Clear3DVector(vector< vector< vector<double> > > &v);
   vector< vector<double> > VectorAxisLogarithm(vector< vector<double> > v,
-                                               unsigned int column);
+                                               unsigned int column); ///< Make log10 of column
 
   vector< vector<double> > VectorAxisPow10(vector< vector<double> > v,
                                                     int column);

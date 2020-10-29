@@ -27,6 +27,7 @@ Particles::Particles() {
   DEBUG = false;
   FASTMODE = false;
   ESCTIME = false;
+  IONIZATION = false;
   ICLossLookup = NULL;
   iclosslookupbins = 200;
   LumLookup = NULL;
@@ -123,7 +124,9 @@ void Particles::CalculateConstants() {
   bremsl_epf = 3. * fineStructConst * sigma_T * c_speed * m_e / pi;
   bremsl_eef = (3. * fineStructConst * sigma_T * c_speed * m_e / (2. * pi));
   if(!Type && (fRadiation->GetICLossLookup()).size()) {
-        SetLookup(fRadiation->GetICLossLookup(), "ICLoss");}
+	// Take the lookup of the IC losses from the Radiation class
+    SetLookup(fRadiation->GetICLossLookup(), "ICLoss");
+  }
   return;
 }
 
@@ -148,7 +151,8 @@ void Particles::CalculateParticleSpectrum(string type, int bins, bool onlyprepar
   } else if (!type.compare("protons")) {
     Type = 1;
   } else {
-    cout << "Particles::CalculateParticleSpectrum: What the fuck! Specify "
+    cout << "Particles::CalculateParticleSpectrum: Particle type not "
+    		"recognized. Please specify "
             "supported particle species! " << endl;
   }
   if (!QUIETMODE) {
@@ -164,16 +168,13 @@ void Particles::CalculateParticleSpectrum(string type, int bins, bool onlyprepar
     return;
   }
     
-
   if (VVector.size() && !RVector.size()) {
     cout << "Particles::CalculateParticleSpectrum: You set a velocity time "
          << "lookup but no radius time lookup. Both need to be set via "
          << "Particles::SetRadiusLookup() and Particles::SetVelocityLookup(), "  
          << "otherwise I exit! Exiting. "<<endl;
     exit(1);
-
   }
-
 
   if(!LumVector.size() && std::isnan(LumConstant) 
      && CustomInjectionSpectrum == NULL 
@@ -182,6 +183,7 @@ void Particles::CalculateParticleSpectrum(string type, int bins, bool onlyprepar
          << endl;
     return;
   }
+
   /* reset Particle Lookup */
   fUtils->Clear2DVector(ParticleSpectrum);
 
@@ -221,7 +223,6 @@ void Particles::CalculateParticleSpectrum(string type, int bins, bool onlyprepar
   else
     eMax = DetermineEmax(Tmin);
 
-
   /* apply a safe margin to the upper energy boundary
    * in order to prevent numerical effects at the upper end of the spectrum.
    */
@@ -236,11 +237,10 @@ void Particles::CalculateParticleSpectrum(string type, int bins, bool onlyprepar
   }
 
   if (!METHOD) {
-  
     PrepareAndRunNumericalSolver(ParticleSpectrum, onlyprepare, dontinitialise);
-    
   }
   else if (METHOD==1) {
+	// semi-analytical
     CalculateEnergyTrajectory();
     CalcSpecSemiAnalyticConstELoss();
   }
@@ -285,7 +285,11 @@ double Particles::SourceSpectrum(double e) {
 }
 
 /**
- * Escape time at energy e (erg) and time t (yrs).
+ * Escape time at energy \a e (erg) and time \a t (yrs).
+ *
+ * @param e : energy of the particle [erg]
+ * @param t : time [yr]
+ * @return escape time of the particle in yr
  */
 double Particles::EscapeTime(double e, double t) {
   // energy and time dependent escape -> 2D intepolation in t,e lookup
@@ -310,8 +314,15 @@ double Particles::EscapeTime(double e, double t) {
   else return 0.;
 }
 
-// this is perhaps outdated, as custom injection functions also cover this 
-// special case. FIXME: Remove this?
+/**
+ * Power law injection spectrum. If eBreak and SpectralIndex2 are specified,
+ * returns a broken power law.
+ *
+ * This is perhaps outdated, as custom injection functions also cover this
+ * special case. FIXME: Remove this?
+ * Advised to use the Particles::CustomInjectionSpectrum function*
+ *
+ */
 double Particles::PowerLawInjectionSpectrum(double e, double ecut,
                                             double emax) {
 
@@ -322,7 +333,6 @@ double Particles::PowerLawInjectionSpectrum(double e, double ecut,
   /* Broken power-law. Used, if both SpectralIndex2 and a break energy are
    * specified */
   // FIXME: special case SpectralIndex,SpectralIndex2 = 2
-
   if (SpectralIndex2 && eBreak) {
     if (SpectralIndex != 2. && SpectralIndex2 != 2.) {
       integral = eBreakS2 * (eBreak2mS2 - emin2mS2) * fS2;
@@ -332,7 +342,9 @@ double Particles::PowerLawInjectionSpectrum(double e, double ecut,
             (pow(emax / eBreak, 2. - SpectralIndex2) - emineBreak2mS2) * fS2;
       }
     } else {
-      cout << "Particles::PowerLawInjectionSpectrum: todo!" << endl;
+      cout << "Particles::PowerLawInjectionSpectrum: "
+    		  "SpectralIndex,SpectralIndex2 = 2 case not implemented!"
+    		  << endl;
     }
   }
   /* else, a single power-law is used in the integrated flux (introduces a small
@@ -349,8 +361,7 @@ double Particles::PowerLawInjectionSpectrum(double e, double ecut,
   /* calculate the normalisation */
   double SourceSpectrumNorm = Lum / integral;
   double J = 0.;
-  /* Broken power-law. If both SpectralIndex2 and a break energy was specified
-   */
+  /* Broken power-law. If both SpectralIndex2 and a break energy was specified */
   if (SpectralIndex2 && eBreak) {
     if (e > eBreak)
       J = SourceSpectrumNorm * pow(e / eBreak, -SpectralIndex) *
@@ -372,7 +383,10 @@ double Particles::PowerLawInjectionSpectrum(double e, double ecut,
 }
 
 /** 
- *Set important class members to values at time t.
+ * Set the values for the class variables and lookups like:
+ * Bfield, Luminosity, Maximum energy, density.
+ *
+ * @param t : time to be given in units of years
  */
 void Particles::SetMembers(double t) {
   if (t < TminInternal || t > TmaxInternal) {
@@ -437,6 +451,11 @@ void Particles::SetMembers(double t) {
   return;
 }
 
+/**
+ * Sets up lookup for the changed of various quantities:
+ * "ICLoss", "Luminosity", "AmbientDensity", "BField",
+   "Emax", "Radius","Speed","EscapeTimeTdep"
+ */
 void Particles::SetLookup(vector<vector<double> > v, string LookupType) {
   int size = (int)v.size();
   if (!size) {
@@ -446,7 +465,7 @@ void Particles::SetLookup(vector<vector<double> > v, string LookupType) {
   vector< vector< double > > lookup;
   if (!LookupType.compare("Luminosity") || !LookupType.compare("Emax")
       || !LookupType.compare("EscapeTimeTdep")) {
-    lookup = fUtils->VectorAxisLogarithm(v,1);
+    lookup = fUtils->VectorAxisLogarithm(v,1);  //transforms in log10
   }
   else {
     lookup = v;
@@ -472,7 +491,6 @@ void Particles::SetLookup(vector<vector<double> > v, string LookupType) {
       *spl[i] = ImportLookup;
       *vs[i] = lookup;   
       DetermineLookupTimeBoundaries();
-      
       return;
     }
   }
@@ -524,8 +542,14 @@ void Particles::ExtendLookup(vector<vector<double> > v, string LookupType) {
   return;
 }
 
-/** calculates the energy loss rate at a given time t from the shock dynamics,
+/**
+ * Calculates the energy loss rate at a given time t from the shock dynamics,
  * ambient photon and B-fields.
+ *
+ * Arguments:
+ *   double E : energy of the particle [erg]
+ * Returns:
+ *   double loss_rate (in seconds)
  */
 double Particles::EnergyLossRate(double E) {
   synchl = icl = adl = bremsl = ppcol = ionization = 0.;
@@ -542,23 +566,15 @@ double Particles::EnergyLossRate(double E) {
   double gamma2 = gamma * gamma;
   double beta=sqrt(1-1/gamma2);
   double p = sqrt(gamma2 - 1.);
-  /* S-parameter. This is only the case in a pure hydrogen gas environment. For
-   * more comlex mixture,
-   * nuclear charge of the different gas species become important. See Haug2004
+  /* S-parameter. See Haug2004 (eq.2)
+   * Here assumed as default hydrogen and 10% Helium
+   * TODO: use the new formulation in the Radiation class
+   * to allow different compositions.
    */
-  double S = N;
+  double S = N * 1.4;
   /* synchrotron losses */
   synchl = (4. / 3.) * sigma_T * c_speed * BField * BField * gamma * gamma /
            (8. * pi);
-  /* ionization losses */
-  //Mean value in the interstellar medium if you consider 10% He
-  double z=1.2;
-  //The ions are the protons
-  double Z=1;  
-  double I=15*eV_to_erg; //erg
-  
-  ionization=N*z*4.*pi*pow(el_charge,4)*(Z*Z)/(m_e*beta/c_speed)*(log((2*m_e*pow(beta,2)/I)*gamma2)-pow(beta,2));
-  
   
   if(!ICLossVector.size()) icl=0.;
   else {
@@ -569,23 +585,27 @@ double Particles::EnergyLossRate(double E) {
   /* adiabatic losses (adlossCoeff = V/R) */
   adl = adLossCoeff * E;
 
-  /* Bremsstrahlung losses Haug+2004 */
+  /** Bremsstrahlung losses Haug+2004 */
   /* electron-proton bremsstrahlung */
-  /* TODO: to be super self-consistent, calculate losses in a lookup, analogue
-   * to the IC lookup */
+  /* TODO: to be super self-consistent, calculate losses in a lookup, analog
+   * to the IC lookup.
+   */
   bremsl_ep = ((2. * gamma2 / 9. - 19. * gamma * p * p / 675. -
                 0.06 * p * p * p * p / gamma) *
                    p * p * p / (gamma * gamma * gamma * gamma * gamma * gamma) +
                gamma * log(gamma + p) - p / 3.) *
               bremsl_epf * S * gamma2 / (gamma2 + p * p);
 
-  /* electron-electron bremsstrahlung */
+  /*
+   * Electron-electron bremsstrahlung
+   * Assuming also here the 10% Helium
+   */
   bremsl_ee =
-      N * bremsl_eef * (p * (gamma - 1.) / gamma) * (log(2. * gamma) - 1. / 3.);
+      N * (1.2) * bremsl_eef * (p * (gamma - 1.) / gamma) * (log(2. * gamma) - 1. / 3.);
   bremsl = bremsl_ep + bremsl_ee;
 
-  /* in case of protons, only take adiabatic losses into account */
-  // TODO: for protons, define analogon to loss rate from (catastrophic) 
+  /* in case of protons, take adiabatic and ionization losses into account */
+  // TODO: for protons, define analog to loss rate from (catastrophic)
   // proton-proton interaction time scale?
   if (Type) {
     synchl = 0.;
@@ -606,6 +626,17 @@ double Particles::EnergyLossRate(double E) {
     else {
       ppcol=0;
       }
+    /* ionization losses */
+    // Mean value in the interstellar medium if you consider 10% He
+    if (IONIZATION) {
+      double z=1.2;  // Includes the effect of 10% Helium in the target.
+      double Z=1;    // The ions are the protons
+      double I=15*eV_to_erg; //erg
+      // Ionization should not play a role if the plasma is fully ionized!
+      // If you want to apply these losses, then need to activate the IONIZATION flag
+      // Ionization computed here is valid only for protons
+      ionization=N*z*4.*pi*pow(el_charge,4)*(Z*Z)/(m_e*beta/c_speed)*(log((2*m_e*pow(beta,2)/I)*gamma2)-pow(beta,2));
+    }
   }
   if (DEBUG == true) {
     synchl = 0.;
@@ -615,8 +646,14 @@ double Particles::EnergyLossRate(double E) {
   return synchl + icl + adl + bremsl + ionization + ppcol;
 }
 
-/** Prepare axes for the numerical solver (and if onlyprepare==false) call the
+/**
+ * Prepare axes for the numerical solver (and if onlyprepare==false) call the
  * solver
+ *
+ * @param particlespectrum : spectrum of the particles
+ * @param onlyprepare : if false, calls the solver and initialise
+ *                      the grid (default false)
+ * @param dontinitialise : if false, sets the initial conditions (default false)
  */
 void Particles::PrepareAndRunNumericalSolver(
     vector<vector<double> > &particlespectrum, bool onlyprepare,
@@ -634,7 +671,9 @@ void Particles::PrepareAndRunNumericalSolver(
   return;
 }
 
-/** create an axis that attributes each bin with a real value. */
+/**
+ * create an axis that attributes each bin with a real value. (e.g. time axis, energy axis).
+ */
 void Particles::GetAxis(double min, double max, int steps, vector<double> &Axis,
                         bool logarithmic) {
 
@@ -651,7 +690,7 @@ void Particles::GetAxis(double min, double max, int steps, vector<double> &Axis,
   } 
 
   steps = int(quot * steps);
-  double binsize = (max - min) / steps; //FIXME: replacec by ebins!
+  double binsize = (max - min) / steps; //FIXME: replace by ebins!
   ebins = steps +1;
   Axis.resize(steps+1);
   for (unsigned int i = 0; i < Axis.size(); i++) {
@@ -661,7 +700,8 @@ void Particles::GetAxis(double min, double max, int steps, vector<double> &Axis,
   return;
 }
 
-/** create the propagation grid out of 2 1D-vectors
+/**
+ * create the propagation grid out of 2 1D-vectors
  * energy in x-direction, time in y-direction
  */
 void Particles::CreateGrid() {
@@ -673,10 +713,15 @@ void Particles::CreateGrid() {
   return;
 }
 
-/** determine the minimum time from where to start
+/**
+ * Determine the minimum time from where to start
  * the calculation. Electrons before that time are injected as
  * a single 'blob'. This time is derived from the requirement
  * that the blob has slid down to energies e.g. E<1GeV(EMIN) at t=Age.
+ *
+ * @param emin : lost energy at time t=age
+ * @param tmin : pointer to the time
+ *
  */
 void Particles::DetermineTMin(double emin, double &tmin) {
   double logt, logtmin, logtmax, logdt, logsteps, TMIN;
@@ -703,7 +748,8 @@ void Particles::DetermineTMin(double emin, double &tmin) {
   return;
 }
 
-/** Determine the maximum energy of particles between tmin and Age.
+/**
+ * Determine the maximum energy of particles between tmin and Age.
  * This energy is then used as upper boundary for the energy dimension of the
  * grid.
  */
@@ -943,8 +989,10 @@ void Particles::ComputeGrid(vector<double> EnergyAxis, double startTime,
         double lw = 0.5*quot*(LaxWendroffSlope(i,ebin,i0)*ElossRate_e1*(ebin-deltaE1)-LaxWendroffSlope(i+1,ebin,i0)*ElossRate_e2*(ebin-deltaE2));
         value -= lw;*/
         
-        /* Comment the next lines until the curly bracket if the
-         * Lax-Wendroff slope limiter is used.                   */
+        /*
+         * Comment the next lines until the curly bracket if the
+         * Lax-Wendroff slope limiter is used.
+         */
         mm =  0.5*quot * (GetMinModSlope(i, ebin, i0) * ElossRate_e1 *
                                  (ebin - deltaE1) -
                              GetMinModSlope(i + 1, ebin, i0) * ElossRate_e2 *
@@ -989,7 +1037,7 @@ void Particles::ComputeGrid(vector<double> EnergyAxis, double startTime,
   }
 
   /* Fill the final lookup, holding the time evolved spectrum at time = Age.
-   * Also, forego edge bins in order to avoid artefacts.
+   * Also, forego edge bins in order to avoid artifacts.
    */
   TIterationStart = 0.;
   fUtils->Clear2DVector(ParticleSpectrum);
@@ -1061,7 +1109,8 @@ double Particles::MinMod(double a, double b) {
     return 0.;
 }
 
-/** wrapper function to calculate the grid only in a specified time interval dT
+/**
+ * Wrapper function to calculate the grid only in a specified time interval dT
  * = T2-T2
  * This is especially useful for the creation of time-series of spectra and
  * necessary
@@ -1183,6 +1232,9 @@ void Particles::CalcSpecSemiAnalyticConstELoss() {
 /**
  * Integrand of the time-integration of the semi-analytical solution. 
  * This is an integration over the time energy trajectory of the electron.
+ *
+ * @param T : time
+ * @param par : additional parameters (energy)
  */ 
 double Particles::SemiAnalyticConstELossIntegrand(double T, void *par) {
   if (energyTrajectoryInverse == NULL || energyTrajectory == NULL) {
@@ -1266,8 +1318,9 @@ void Particles::SetType(string type) {
   else if (!type.compare("protons"))
     Type = 1;
   else
-    cout << "Particles::SetType: What the f***! Specify supported particle "
-            "species! " << endl;
+    cout << "Particles::SetType: Particle type not recognized! "
+    		"Please specify supported particle "
+            "species! (electrons or protons)" << endl;
   return;
 }
 
@@ -1355,8 +1408,8 @@ void Particles::DetermineLookupTimeBoundaries() {
   return;
 }
 
-/**
- * Return a particle SED dN/dE vs E (erg vs TeV)
+/*
+ * Return a particle SED E vs E^2dN/dE (TeV vs erg)
  */
 vector<vector<double> > Particles::GetParticleSED() {
   vector<vector<double> > v;
@@ -1370,8 +1423,8 @@ vector<vector<double> > Particles::GetParticleSED() {
   return v;
 }
 
-/**
- * Return total energy in particles. Input energy bounds in TeV
+/*
+ * Return total energy in particles. Input energy bounds in erg!
  * FIXME:This function sucks, have to think of something better!
  */
 double Particles::GetParticleEnergyContent(double E1, double E2) {
@@ -1408,7 +1461,8 @@ void Particles::SetIntegratorMemory(string mode) {
   }
   return;
 }
-/**
+
+/*
  * Integration function using the GSL QAG functionality
  *
  */
@@ -1438,7 +1492,7 @@ double Particles::Integrate(fPointer f, double *x, double emin, double emax,
   else return integral;
 }
 
-/**
+/*
  * Set a custom injection spectrum. Input is a 2D vector with 2 colums, first
  * column holds energy in erg. 
  * mode = 0 -> custom injection spectrum lookup:
@@ -1495,7 +1549,7 @@ void Particles::SetCustomEnergylookup(vector< vector<double> > vCustom,
   return;    
 }
 
-/**
+/*
  * Set a custom injection spectrum or escape time. Input is a 2D vector with 3 colums.
  * mode 0 = custom injection spectrum: first column holds time in yrs, second 
  * energy in erg, third holds differential rate in 
@@ -1587,7 +1641,7 @@ void Particles::AddArbitraryTargetPhotons(vector<vector<double> > PhotonArray) {
   fRadiation->AddArbitraryTargetPhotons(PhotonArray);
 }
 
-/** Reset photon target field i by a an arbitray distribution of target photons,
+/** Reset photon target field i by a an arbitrary distribution of target photons,
  * which is used in the
  * IC cooling process in this class.
  */
@@ -1651,15 +1705,22 @@ void Particles::ClearTargetPhotons() {
 //  SetLookup(fRadiation->GetICLossLookup(), "ICLoss");
 //}
 
+
 void Particles::CheckSanityOfTargetPhotonLookup() {
   fRadiation->CheckSanityOfTargetPhotonLookup();
 }
 
+
 vector<vector<double> > Particles::GetTargetPhotons(int i) {
   return fRadiation->GetTargetPhotons(i);
 }
+
+/*
+ * Returns the energy loss rate of a particle with energy E depending on
+ * the loss process. Energy is given in erg.
+ */
 double Particles::GetEnergyLossRate(double E, string type, double age) {
-    
+
     if(age) {
         SetMembers(age);
     }
@@ -1680,6 +1741,18 @@ double Particles::GetEnergyLossRate(double E, string type, double age) {
     }
 }
 
+/**
+ * Computes and returns either the energy loss rate of the particle or the
+ * cooling time via setting the \a TIMESCALE boolean to false or true
+ * respectively
+ *
+ * @param epoints : vector of energies of the particle
+ * @param type : process for which you want the information
+ * @param age : age at which you want to compute
+ * @param TIMESCALE : 1 for cooling time; 0 for energy loss rate
+ *
+ * @return v as a vector of tuples (energy, value)
+ */
 vector< vector<double> > Particles::GetEnergyLossRateVector(vector<double> epoints,
                                                         string type, double age, 
                                                                bool TIMESCALE) {
@@ -1702,6 +1775,17 @@ vector< vector<double> > Particles::GetEnergyLossRateVector(vector<double> epoin
     return v;
 }
 
+/**
+ * Returns the injection spectrum:
+ *
+ * @param epoints : vector of energies to return the spectrum (erg units)
+ * @param age : age at which to return the spectrum (if age not
+ *                            given, then computes as the injection)
+ * @param SED : true if the particle spectrum should be returned
+ *                            as E^2dN/dE
+ * @return v : vector of tuples (Energy, spectrum)
+ *                               energy returned in TeV.
+ */
 vector< vector<double> > Particles::GetInjectionSpectrumVector(
                                                       vector<double> epoints,
                                                       double age, bool SED) {
@@ -1725,6 +1809,9 @@ vector< vector<double> > Particles::GetInjectionSpectrumVector(
     return v;
 }
 
+/**
+ * Wrapper around other get functions
+ */
 vector< vector<double> > Particles::GetQuantityVector(vector<double> epoints,
                                                       double age, string mode) {
     if(!epoints.size()) {
@@ -1763,8 +1850,11 @@ vector< vector<double> > Particles::GetQuantityVector(vector<double> epoints,
 
 
 
-/**
- * Funtion under construction! Use at own peril!
+/*
+ * Function under construction! Use at own peril!
+ * TODO: The handling of the SSC field should be done better. Not sure all the cases
+ * are correctly taken into account.
+ * To work the SSC must be the last target field added to list.
  */
 vector<double> Particles::CalculateSSCEquilibrium(double tolerance, int bins) {
   if (TminExternal) Tmin = TminExternal;
@@ -1773,6 +1863,7 @@ vector<double> Particles::CalculateSSCEquilibrium(double tolerance, int bins) {
   int steps = 10;
   double delta_log_r = (log10(r_start) - log10(r_orig)) / steps;
   double delta_t = (Age-Tmin) / steps;
+  // returns Radiation::RADFIELD_COUNTER
   double target_field_count = fRadiation->GetTargetFieldCount();
   double e_p = 0.;
   double e_p_0 = 0.;
@@ -1800,17 +1891,18 @@ vector<double> Particles::CalculateSSCEquilibrium(double tolerance, int bins) {
     }
     R = pow(10.,log_r);
     if (log_r == log10(r_start)) AddSSCTargetPhotons();
-    else ResetWithSSCTargetPhotons(target_field_count);
+    // -1 because the counter starts from 1, while the indexing of the target
+    // fields starts from 0
+    else ResetWithSSCTargetPhotons(target_field_count-1);
     CalculateElectronSpectrum(bins);
     e_p = GetParticleEnergyContent();
     iter.push_back(e_p);
     e_p_0 = e_p;
   }   
-
-    cout << "   -> precision reached / goal:     " << endl;  
+  cout << "   -> precision reached / goal:     " << endl;
   R = r_orig;
   while(1){
-    ResetWithSSCTargetPhotons(target_field_count);
+    ResetWithSSCTargetPhotons(target_field_count-1);
     SetMembers(Age);
     CalculateElectronSpectrum(bins);
     e_p = GetParticleEnergyContent();
