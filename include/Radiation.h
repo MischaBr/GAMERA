@@ -63,7 +63,7 @@ class Radiation {
   double NeutrinoFlux1(double energy_proton, void *par);
   double Felectron(double Ee_erg, double Ep_erg);
   double Fnumu(double Enu_erg, double Ep_erg);
-  //double CalculateNeutrinoFlux(double energy, int leptontype);
+  double CalculateNeutrinoFlux(double energy, int leptontype);
   
   double K(double nu, double x);             ///< modified Bessel function
   double K_53(double x, void *par);          ///< modified Bessel function of order 5/3
@@ -366,7 +366,8 @@ class Radiation {
   
   
    void UseKelner(bool kelner);  // Use parametrization of Kelner et al. 2006 for pp emission
-
+   double InelasticPPXSectionKelner(double EP); // Inelastic PP cross section from Kelner
+   
    void UseKamae(bool kamae); // Use parametrization of Kamae et al. 2006 for pp emission
 
   /// Calculate epsilon factor for hadronic interactions
