@@ -100,6 +100,8 @@ Particles::Particles() {
 Particles::~Particles() {
   for (unsigned int i = 0; i < grid.size(); i++) grid[i].clear();
   grid.clear();
+  delete fUtils;
+  delete fRadiation;
 }
 
 
