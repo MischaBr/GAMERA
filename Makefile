@@ -67,7 +67,7 @@ libgamera : $(objectsSO)
 # make gappa package
 gappa:
 	cd python && \
-	swig -python -c++ -outdir ../lib -o _gappa.cc gappa.i && \
+	swig -python -c++ -outdir ../lib -o _gappa_swig.cc gappa_swig.i && \
 	python setup.py build_ext --build-lib ../lib
 
 
@@ -78,7 +78,7 @@ clean-bin:
 clean-lib:
 	-rm -f lib/*
 clean-python:
-	-rm -f python/_gappa.cc python/_gappa.so python/gappa.py
+	-rm -f python/_gappa_swig.cc python/_gappa_swig.so python/gappa_swig.py
 	-rm -rf python/build/
 
 clean: clean-out clean-bin clean-lib clean-python

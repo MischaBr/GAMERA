@@ -22,8 +22,8 @@ extra_compile_args.append('-m64')
 extra_compile_args.append('-std=c++11')
 
 extension_mod = Extension(
-    "_gappa",
-    ["_gappa.cc",
+    "_gappa_swig",
+    ["_gappa_swig.cc",
      "../src/Radiation.C",
      "../src/Particles.C",
      "../src/Utils.C",
@@ -38,6 +38,6 @@ extension_mod = Extension(
 )
 
 setup(
-    name="gappa",
+    name="gappa_swig",
     ext_modules=[extension_mod],
 )
