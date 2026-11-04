@@ -1,1 +1,1 @@
-Sitemap: https://mischabr.github.io/GAMERA/sitemap.xml
+Sitemap: http://localhost:4000/GAMERA/sitemap.xml
